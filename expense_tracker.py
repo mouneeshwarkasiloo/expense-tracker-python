@@ -161,27 +161,21 @@ def summary_month(expenses: List[Expense]) -> None:
 
     print(f"{'Month':<10} {'Total Spent':>15}")
     print("-" * 28)
-
+    
     for m, total in sorted(monthly.items()):
         print(f"{m:<10} {total:>15.2f}")
-
     print()
-
-
 def reset_expenses() -> None:
     """Deletes all stored expenses."""
     confirm = input(
         "\nAre you sure you want to clear ALL expenses? This cannot be undone. (yes/no): "
     ).strip().lower()
-
     if confirm in ("yes", "y"):
         DATA_FOLDER.mkdir(parents=True, exist_ok=True)
         EXPENSE_FILE.write_text("[]", encoding="utf-8")
         print("All expense records cleared.\n")
     else:
         print("Reset cancelled.\n")
-
-
 def menu():
     expenses = load_expenses()
 
@@ -197,7 +191,6 @@ def menu():
 5. Reset All Records
 6. Exit
 """)
-
         choice = input("Select an option (1-6): ").strip()
 
         if choice == "1":
@@ -216,7 +209,5 @@ def menu():
             break
         else:
             print("Invalid option.\n")
-
-
 if __name__ == "__main__":
     menu()
