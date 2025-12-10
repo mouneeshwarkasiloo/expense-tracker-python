@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 """
 A small command-line tool for tracking personal expenses.
 Data is stored inside a JSON file (data/expenses.json). The idea
