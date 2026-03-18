@@ -1,163 +1,220 @@
-#This is my version two (v2) of expense tracker and I named is FinSight 
+import sqlite3
 from datetime import datetime
 
-# ANSI colour codes for terminal rendering
-CYN = "\033[96m"
-GRN = "\033[92m"
-YEL = "\033[93m"
-RST = "\033[0m"
+# ---- colors (just for better CLI look) ----
+RESET = "\033[0m"
+GREEN = "\033[92m"
+RED = "\033[91m"
+CYAN = "\033[96m"
+YELLOW = "\033[93m"
 BOLD = "\033[1m"
 
 
-def ask_int(prompt, low=None, high=None):
-    """Prompt for integer input with simple validation and helpful messages."""
-    while True:
-        s = input(prompt).strip()
-        if not s:
-            print("  enter a value")
-            continue
-        try:
-            v = int(s)
-            if low is not None and v < low:
-                print(f"  must be ≥ {low}")
-                continue
-            if high is not None and v > high:
-                print(f"  must be ≤ {high}")
-                continue
-            return v
-        except ValueError:
-            print("  integers only")
+# ---- DB setup ----
+conn = sqlite3.connect("expenses.db")
+cur = conn.cursor()
+
+cur.execute("""
+CREATE TABLE IF NOT EXISTS expenses(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date TEXT,
+    category TEXT,
+    description TEXT,
+    amount REAL
+)
+""")
+
+cur.execute("""
+CREATE TABLE IF NOT EXISTS config(
+    id INTEGER PRIMARY KEY,
+    income REAL,
+    target REAL
+)
+""")
+
+conn.commit()
 
 
-def ask_float(prompt, low=None, high=None):
-    """Prompt for float input with validation. Accepts integers too."""
-    while True:
-        s = input(prompt).strip()
-        if not s:
-            print("  enter a value")
-            continue
-        try:
-            v = float(s)
-            if low is not None and v < low:
-                print(f"  must be ≥ {low}")
-                continue
-            if high is not None and v > high:
-                print(f"  must be ≤ {high}")
-                continue
-            return v
-        except ValueError:
-            print("  numbers only")
+# ---- load saved values ----
+def load_config():
+    cur.execute("SELECT income, target FROM config WHERE id=1")
+    row = cur.fetchone()
+    return row if row else (0, 0)
 
 
-def pad(text, width):
-    """Short helper to align table columns. Truncate with ellipsis if too long."""
-    t = str(text)
-    if len(t) > width:
-        return t[: width - 1] + "…"
-    return t.ljust(width)
+income, target = load_config()
 
 
-def human_header():
-    """Print the small ANSI-coloured header. Kept minimal to appear human-printed."""
-    print(f"{CYN}{BOLD}Energy Analyzer — CLI{RST}  |  simple usage")
-    print()
+# ---- helpers ----
+def total_expense():
+    cur.execute("SELECT SUM(amount) FROM expenses")
+    val = cur.fetchone()[0]
+    return val if val else 0
 
 
-def collect_devices(n):
-    """Collect device information from user and compute per-device daily kWh."""
-    devices = []
-    print("\nEnter device details (example names: Air Conditioner, Fridge, Fan).")
-    for i in range(1, n + 1):
-        name = input(f"  {i}. Device name: ").strip() or f"Device{i}"
-        watts = ask_float("     Watts (W): ", low=1)
-        hours = ask_float("     Hours per day: ", low=0, high=24)
-        qty = ask_int("     Quantity: ", low=1, high=1000)
-        kwh_day = (watts * hours * qty) / 1000.0
-        devices.append({"name": name, "watts": watts,
-                       "hours": hours, "qty": qty, "kwh_day": kwh_day})
-    return devices
+def category_data():
+    cur.execute("SELECT category, SUM(amount) FROM expenses GROUP BY category")
+    return cur.fetchall()
 
 
-def summary_and_report(devices, days, tariff):
-    """Compute totals, print summary, and write a plain-text report file."""
-    total_kwh_day = sum(d["kwh_day"] for d in devices)
-    total_kwh_month = total_kwh_day * days
-    est_bill = total_kwh_month * tariff
-    top = max(devices, key=lambda d: d["kwh_day"])
-    # Table header
-    print()
-    print(f"{BOLD}Per-Device Daily Usage{RST}")
-    h1, h2, h3, h4, h5 = "Device", "Watts", "Hours", "Qty", "kWh/day"
-    w1, w2, w3, w4, w5 = 20, 7, 7, 5, 10
-    total_width = w1 + w2 + w3 + w4 + w5 + 8
-    print("-" * total_width)
-    print(pad(h1, w1), "|", pad(h2, w2), "|", pad(
-        h3, w3), "|", pad(h4, w4), "|", pad(h5, w5))
-    print("-" * total_width)
-    for d in devices:
-        print(pad(d["name"], w1), "|", pad(str(int(d["watts"])), w2), "|", pad(
-            f'{d["hours"]:.1f}', w3), "|", pad(str(d["qty"]), w4), "|", pad(f'{d["kwh_day"]:.3f}', w5))
-    print("-" * total_width)
-    # Summary (minimal color)
-    print()
-    print(f"{GRN}{BOLD}Summary{RST}")
-    print(f"  Total daily consumption      : {total_kwh_day:.3f} kWh")
-    print(
-        f"  Billing cycle consumption    : {total_kwh_month:.3f} kWh (days={days})")
-    print(f"  Estimated bill @ ₹{tariff:.2f}/kWh : {YEL}₹{est_bill:,.2f}{RST}")
-    print(
-        f"  Highest daily consumer       : {top['name']} ({top['kwh_day']:.3f} kWh/day)")
-    print()
-    # Practical tips (simple heuristics)
-    print("Tips:")
-    if total_kwh_day > 15:
-        print("  • Consider staggering heavy loads to reduce peak usage.")
-    if top["hours"] > 8 and top["watts"] > 200:
-        print(
-            f"  • Try reducing {top['name']} hours or enable energy-saver settings.")
-    if tariff > 9:
-        print("  • Tariff is relatively high—small savings on daily kWh translate to meaningful ₹ reductions.")
-    if any(d["watts"] < 80 and d["hours"] > 10 for d in devices):
-        print("  • Long-running low-watt devices add up—audit always-on equipment.")
+# ---- set income ----
+def set_income():
+    global income
+    income = float(input("Enter income: "))
 
-    # Write report
-    stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    lines = [
-        "Energy Analyzer Report",
-        f"Generated: {stamp}",
-        "",
-        f"Billing days: {days}",
-        f"Tariff (₹/kWh): {tariff}",
-        "",
-        "Per-Device Daily Usage:",
-        f"{h1:20} {h2:>7} {h3:>7} {h4:>5} {h5:>10}"
-    ]
-    for d in devices:
-        lines.append(
-            f"{d['name']:20} {int(d['watts']):7d} {d['hours']:7.1f} {d['qty']:5d} {d['kwh_day']:10.3f}")
-    lines += [
-        "",
-        f"Total daily kWh: {total_kwh_day:.3f}",
-        f"Monthly kWh   : {total_kwh_month:.3f}",
-        f"Est. bill (₹) : {est_bill:.2f}",
-        f"Top device    : {top['name']} ({top['kwh_day']:.3f} kWh/day)"
-    ]
-    with open("energy_report.txt", "w", encoding="utf-8") as f:
-        f.write("\n".join(lines))
-    print("\nReport saved to: energy_report.txt")
+    cur.execute("DELETE FROM config")
+    cur.execute("INSERT INTO config VALUES (1, ?, ?)", (income, target))
+    conn.commit()
+
+    print(f"{GREEN}Income saved{RESET}\n")
 
 
-def main():
-    human_header()
-    days = ask_int("Billing days (typical 30): ", low=1, high=365)
-    tariff = ask_float("Tariff ₹/kWh (e.g., 8): ", low=0)
-    n = ask_int("Number of devices: ", low=1, high=100)
-    devices = collect_devices(n)
-    if not devices:
-        print("No devices entered; exiting.")
+# ---- set savings ----
+def set_target():
+    global target
+
+    if income == 0:
+        print("Set income first\n")
         return
-    summary_and_report(devices, days, tariff)
+
+    ch = input("1:%  2:amount : ")
+
+    if ch == "1":
+        p = float(input("Enter %: "))
+        target = (p/100)*income
+    else:
+        target = float(input("Enter amount: "))
+
+    cur.execute("DELETE FROM config")
+    cur.execute("INSERT INTO config VALUES (1, ?, ?)", (income, target))
+    conn.commit()
+
+    print(f"\nTarget : ₹{target}")
+    print(f"You can spend : ₹{income - target}\n")
 
 
-if __name__ == "__main__":
-    main()
+# ---- add expense ----
+def add_expense():
+    today = datetime.today().strftime("%Y-%m-%d")
+
+    date = input(f"Date [{today}]: ") or today
+    cat = input("Category: ").strip().lower()
+    desc = input("Desc: ") or "none"
+
+    while True:
+        try:
+            amt = float(input("Amount: "))
+            break
+        except:
+            print("Enter number")
+
+    cur.execute(
+        "INSERT INTO expenses(date,category,description,amount) VALUES (?,?,?,?)",
+        (date, cat, desc, amt)
+    )
+    conn.commit()
+
+    print("Added\n")
+
+
+# ---- view ----
+def view():
+    cur.execute("SELECT * FROM expenses")
+    for r in cur.fetchall():
+        print(r)
+    print()
+
+
+# ---- graph ----
+def bar(label, val, maxv):
+    width = 20
+    fill = int((val/maxv)*width) if maxv else 0
+    print(f"{label:<10} {'█'*fill}{'░'*(width-fill)} ₹{val}")
+
+
+# ---- insights ----
+def insights():
+    if income == 0 or target == 0:
+        print("Set income + goal first\n")
+        return
+
+    spent = total_expense()
+    remaining = income - spent
+    safe = income - target - spent
+
+    print(f"\n{CYAN}--- Insights ---{RESET}\n")
+
+    print(f"Income   : ₹{income}")
+    print(f"Spent    : ₹{spent}")
+    print(f"Balance  : ₹{remaining}\n")
+
+    print(f"Target   : ₹{target}")
+
+    if safe >= 0:
+        print(f"Safe spend : ₹{safe}")
+    else:
+        print(f"{RED}Over budget : ₹{-safe}{RESET}")
+
+    # ---- status ----
+    ok = remaining >= target
+    print(GREEN + "\nGoal achieved" + RESET if ok else RED + "\nGoal not achieved" + RESET)
+
+    # ---- progress bar ----
+    prog = min(remaining/target, 1) if target else 0
+    fill = int(prog*20)
+    color = GREEN if ok else RED
+    print(color + "█"*fill + "░"*(20-fill) + RESET, f"{prog*100:.1f}%")
+
+    # ---- category graph ----
+    print(f"\n{CYAN}Category:{RESET}")
+    data = category_data()
+    maxv = max([x[1] for x in data], default=1)
+
+    for c, a in data:
+        bar(c, a, maxv)
+
+    # ---- simple suggestion ----
+    for c, a in data:
+        if a > 0.3 * income:
+            print(f"- Reduce {c}")
+
+    print()
+
+
+# ---- reset ----
+def reset():
+    if input("Clear all? ") == "yes":
+        cur.execute("DELETE FROM expenses")
+        cur.execute("DELETE FROM config")
+        conn.commit()
+        print("Done\n")
+
+
+# ---- menu ----
+def menu():
+    while True:
+        print(f"""
+{BOLD}{CYAN}FinSight CLI{RESET}
+
+{YELLOW}1{RESET}. Income
+{YELLOW}2{RESET}. Savings Goal
+{YELLOW}3{RESET}. Add Expense
+{YELLOW}4{RESET}. View
+{YELLOW}5{RESET}. Insights
+{YELLOW}6{RESET}. Reset
+{YELLOW}7{RESET}. Exit
+""")
+
+        ch = input("Choice: ")
+
+        if ch == "1": set_income()
+        elif ch == "2": set_target()
+        elif ch == "3": add_expense()
+        elif ch == "4": view()
+        elif ch == "5": insights()
+        elif ch == "6": reset()
+        elif ch == "7": break
+        else: print("Invalid\n")
+
+
+menu()
